@@ -1,1 +1,1 @@
-export { ContextUsagePlugin, default } from "./plugins/context-usage.js"
+export { ContextUsagePlugin, default } from "./src/context-usage.js"

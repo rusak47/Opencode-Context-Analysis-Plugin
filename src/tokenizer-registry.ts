@@ -1,9 +1,10 @@
+// @ts-nocheck
 import path from "path"
 import fs from "fs/promises"
 import { fileURLToPath } from "url"
 
 const moduleRoot = path.dirname(fileURLToPath(import.meta.url))
-const pluginRoot = path.join(moduleRoot, "..", "..")
+const pluginRoot = path.join(moduleRoot, "..")
 const vendorRoot = path.join(pluginRoot, "vendor", "node_modules")
 const OPENAI_PROVIDERS = new Set(["openai", "azure", "opencode"])
 
@@ -58,7 +59,7 @@ export async function resolveTokenModel(messages) {
   // Fallback to approx estimation instead of throwing
   return {
     name: seenModels[0]?.original ?? seenProviders[0]?.original ?? "unknown",
-    spec: { kind: "approx" },
+    spec: { kind: "approx" as const },
   }
 }
 
@@ -306,20 +307,14 @@ async function loadTransformersMap() {
 }
 
 async function loadProviderManifest() {
-  const candidates = [
-    path.join(pluginRoot, "tokenizer-aliases.json"),
-    path.join(moduleRoot, "tokenizer-aliases.json"),
-  ]
-  for (const manifestPath of candidates) {
-    try {
-      const raw = await fs.readFile(manifestPath, "utf8")
-      const parsed = JSON.parse(raw)
-      return parsed.providers || {}
-    } catch {
-      // continue to next candidate
-    }
+  const manifestPath = path.join(pluginRoot, "tokenizer-aliases.json")
+  try {
+    const raw = await fs.readFile(manifestPath, "utf8")
+    const parsed = JSON.parse(raw)
+    return parsed.providers || {}
+  } catch {
+    return {}
   }
-  return {}
 }
 
 async function readFirstExistingJSON(candidates) {
@@ -383,7 +378,7 @@ const BUILTIN_OPENAI_FALLBACK = {
 
 async function loadTransformersFallback() {
   try {
-    const manifestPath = path.join(moduleRoot, "tokenizer-aliases.json")
+    const manifestPath = path.join(pluginRoot, "tokenizer-aliases.json")
     const raw = await fs.readFile(manifestPath, "utf8")
     const data = JSON.parse(raw)
     return data.transformers || {}

@@ -12,7 +12,7 @@ Provides a `/context` command that shows token usage breakdown by category (syst
 
 ```bash
 cd ~/.config/opencode/plugins/opencode-context-analysis
-bun install --prefix vendor && bun run build
+npm install --prefix vendor
 ```
 
 Register in `~/.config/opencode/opencode.json`:
@@ -20,11 +20,13 @@ Register in `~/.config/opencode/opencode.json`:
 ```json
 {
   "command": {
-    "context": { "template": "{file:/home/colt/.config/opencode/plugins/opencode-context-analysis/commands/context.md}" }
+    "context": { "template": "{file:$HOME/.config/opencode/plugins/opencode-context-analysis/commands/context.md}" }
   },
-  "plugin": ["/home/colt/.config/opencode/plugins/opencode-context-analysis"]
+  "plugin": ["$HOME/.config/opencode/plugins/opencode-context-analysis"]
 }
 ```
+
+Restart OpenCode and type `/context`.
 
 ## Tokenizer Aliases
 
@@ -65,32 +67,28 @@ No rebuild needed — aliases are read at runtime via `fs.readFile`.
 Install:
 
 ```bash
-cd vendor && bun add js-tiktoken @huggingface/transformers --ignore-scripts
+cd vendor && npm install --ignore-scripts
 ```
 
-## Build
-
-```bash
-bun run build    # runs tsc, output to dist/
-```
-
-No need to copy `tokenizer-aliases.json` — it's read from plugin root at runtime.
+Without vendor deps, the plugin degrades gracefully: OpenAI models use a hardcoded fallback map, non-OpenAI models fall back to `chars/4` estimation. Token counts will be less accurate but the plugin still works.
 
 ## Testing
 
-Run the full test suite:
+Integration tests (vendor deps, aliases, encoders):
 
 ```bash
-cd ~/.config/opencode/plugins/opencode-context-analysis
-node test.mjs
+node tests/test.mjs
 ```
 
-This validates:
-- Vendor dependencies installed
-- `tokenizer-aliases.json` readable and configured
-- Tiktoken encoder works (OpenAI models)
-- HuggingFace tokenizer loads (non-OpenAI models, e.g. GLM for 9router)
-- Dist files built
+⚠️ The unit test wipes `vendor/node_modules/` with mock fixtures. Run integration tests first, or reinstall vendor deps after.
+
+Unit tests (tokenizer resolution logic):
+
+```bash
+npx tsx --test tests/tokenizer-resolution.test.mjs
+```
+
+
 
 ## Debugging Notes
 
@@ -102,13 +100,9 @@ The plugin loader expects `package.json` and `index.{ts,js}` at the plugin ROOT 
 
 When a file-based plugin has an `exports` field in `package.json`, the entry resolver returns `undefined` for server-kind plugins. Keep `package.json` minimal — no `main`, no `exports`, no `types`.
 
-### Two source files can exist — tsc compiles `.ts`, not `.mjs`
+### `import.meta.url` resolves to `src/`, not root
 
-Both `tokenizer-registry.mjs` (root) and `plugins/tokenizer-registry.ts` existed. `tsc` compiles the `.ts` version into `dist/plugins/tokenizer-registry.js`. Editing only the `.mjs` had zero effect. Always edit the `.ts` file.
-
-### `import.meta.url` resolves to dist location, not source root
-
-When `tokenizer-registry.ts` compiles to `dist/plugins/tokenizer-registry.js`, `import.meta.url` points to `dist/plugins/`. Paths relative to plugin root use `path.join(moduleRoot, "..", "..")`.
+`tokenizer-registry.ts` lives in `src/`, so `import.meta.url` points to `src/`. Paths relative to plugin root use `path.join(moduleRoot, "..")`.
 
 ### `model_to_encoding.json` missing in newer js-tiktoken
 

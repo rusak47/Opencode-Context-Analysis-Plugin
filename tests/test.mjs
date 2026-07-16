@@ -3,7 +3,7 @@ import fs from "fs/promises"
 import { fileURLToPath, pathToFileURL } from "url"
 
 const moduleRoot = path.dirname(fileURLToPath(import.meta.url))
-const pluginRoot = moduleRoot
+const pluginRoot = path.resolve(moduleRoot, "..")
 const vendorRoot = path.join(pluginRoot, "vendor", "node_modules")
 
 const results = []
@@ -123,26 +123,6 @@ async function testHuggingFaceTokenizer() {
   }
 }
 
-async function testDistBuild() {
-  console.log("\n--- Dist Build ---")
-
-  const files = [
-    "dist/index.js",
-    "dist/plugins/tokenizer-registry.js",
-    "dist/plugins/context-usage.js",
-    "dist/plugins/tokenizer-aliases.json",
-  ]
-
-  for (const file of files) {
-    try {
-      await fs.access(path.join(pluginRoot, file))
-      pass(`dist/${file.split("/").pop()}`)
-    } catch {
-      fail(`${file}`, "missing from dist/")
-    }
-  }
-}
-
 async function main() {
   console.log(`Plugin root: ${pluginRoot}`)
   console.log(`Vendor root: ${vendorRoot}\n`)
@@ -151,7 +131,6 @@ async function main() {
   await testTokenizerAliases()
   await testTiktokenEncoder()
   await testHuggingFaceTokenizer()
-  await testDistBuild()
 
   console.log("\n--- Summary ---")
   const passed = results.filter(r => r.ok)

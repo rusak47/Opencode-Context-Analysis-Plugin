@@ -7,13 +7,11 @@ import { fileURLToPath } from "url"
 import {
   resolveTokenModel,
   resetTokenizerRegistryCache,
-  TokenizerResolutionError,
-} from "../.opencode/plugin/tokenizer-registry.mjs"
+} from "../src/tokenizer-registry.ts"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, "..")
-const pluginRoot = path.join(projectRoot, ".opencode", "plugin")
-const vendorRoot = path.join(pluginRoot, "vendor", "node_modules")
+const vendorRoot = path.join(projectRoot, "vendor", "node_modules")
 
 async function ensureFixtures() {
   await fs.rm(vendorRoot, { recursive: true, force: true })
@@ -87,20 +85,13 @@ test("suggests closest tokenizer alias for similar model IDs", async () => {
   assert.equal(model.spec.hub, "Xenova/claude-mock")
 })
 
-test("throws a descriptive error when no tokenizer is available", async () => {
-  await assert.rejects(
-    async () =>
-      resolveTokenModel([
-        {
-          info: { role: "assistant", modelID: "unknown-model", providerID: "mystery" },
-          parts: [],
-        },
-      ]),
-    (error) => {
-      assert(error instanceof TokenizerResolutionError)
-      assert.equal(error.models.includes("unknown-model"), true)
-      assert.equal(error.providers.includes("mystery"), true)
-      return true
+test("returns approx fallback for unknown model and provider", async () => {
+  const model = await resolveTokenModel([
+    {
+      info: { role: "assistant", modelID: "unknown-model", providerID: "mystery" },
+      parts: [],
     },
-  )
+  ])
+
+  assert.equal(model.spec.kind, "approx")
 })
