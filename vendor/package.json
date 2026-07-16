@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "js-tiktoken": "^1.0.21"
+  }
+}

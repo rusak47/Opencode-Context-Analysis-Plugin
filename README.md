@@ -1,200 +1,119 @@
 # OpenCode Context Analysis Plugin
 
-Ever wonder where all your AI tokens are going? This plugin gives you a clear, visual breakdown of exactly how tokens are being used in your OpenCode sessions.
+Provides a `/context` command that shows token usage breakdown by category (system, user, assistant, tools, reasoning) with bar chart visualization.
 
-## 🎯 What It Does
+## Usage
 
-- **See Your Token Usage**: Get instant insights into how tokens are distributed across your conversations
-- **Track Individual Tools**: Find out which tools (`read`, `bash`, `webfetch`, etc.) consume the most tokens
-- **Visual Charts**: Easy-to-read bar charts show percentages and counts at a glance
-- **Smart Analysis**: Automatically identifies different types of content (system prompts, user messages, tools, etc.)
-- **Works Everywhere**: Compatible with OpenAI, Claude, Llama, Mistral, DeepSeek, and more
+```
+/context                  # Standard analysis
+```
 
-## 🚀 Quick Start (2 Steps)
-
-1. **Clone the plugin**
-   ```bash
-   git clone https://github.com/IgorWarzocha/Opencode-Context-Analysis-Plugin.git
-   ```
-
-2. **Copy .opencode folder to your project**
-   ```bash
-   cp -r Opencode-Context-Analysis-Plugin/.opencode ./
-   ```
-
-3. **Restart OpenCode** and type `/context`
-
-> **Quick Installation**: Just paste this entire README into OpenCode and ask it to install the plugin for you!
-
-That's it! You'll see a detailed breakdown like this:
-
-### No arguments:
-
-<p align="center">
-<img width="100%" alt="image" src="https://github.com/user-attachments/assets/7967e6fa-e87d-4517-a247-61c8cf7fa60b" />
-</p>
-
-### /context extremely detailed:
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/2afb66d7-d4da-4d9b-9439-04fcfee94722"
-       alt="image"
-       style="width:49%; padding: 0 1%;" />
-  <img src="https://github.com/user-attachments/assets/a7473a0b-5e7c-467e-8d5b-c4ccb4064f93"
-       alt="image"
-       style="width:49%; padding: 0 1%;" />
-</p>
-
-## 🛠️ Installation Options
-
-### For a Single Project
-
-1. **Clone the plugin**
-   ```bash
-   git clone https://github.com/IgorWarzocha/Opencode-Context-Analysis-Plugin.git
-   ```
-
-2. **Copy .opencode folder to your project**
-   ```bash
-   cp -r Opencode-Context-Analysis-Plugin/.opencode ./
-   ```
-
-3. **Restart OpenCode** - `/context` command will be available
-
-**Verify it worked**: Type `/` in OpenCode and you should see `/context` in suggestions.
-
-### For All Projects (Global)
-
-Want `/context` available everywhere? Copy the plugin to your global OpenCode config:
-
-1. **Clone the plugin** (if you haven't already)
-   ```bash
-   git clone https://github.com/IgorWarzocha/Opencode-Context-Analysis-Plugin.git
-   ```
-
-2. **Copy .opencode folder to global config location**
-   ```bash
-   cp -r Opencode-Context-Analysis-Plugin/.opencode ~/.config/opencode/
-   ```
-
-3. **Restart OpenCode** - `/context` will work in any project
-
-**Note**: Creates `~/.config/opencode/` if it doesn't exist.
-
-### Installation Summary
-
-| Method      | Scope          | Location                        | Use Case                          |
-| ----------- | -------------- | ------------------------------- | --------------------------------- |
-| **Project** | Single project | `your-project/.opencode/`       | Project-specific context analysis |
-| **Global**  | All projects   | `~/.config/opencode/.opencode/` | Universal access across projects  |
-
-### Troubleshooting
-
-**Plugin not loading**: Check that `.opencode/plugin/context-usage.ts` exists
-**Command not found**: Make sure you copied the `.opencode` folder to your project root
-**Git clone failed**: Check your internet connection and GitHub access
-
-## 📖 Usage Guide
-
-### Basic Commands
+## Setup
 
 ```bash
-/context                    # Standard analysis
-/context detailed            # More detailed breakdown
-/context short               # Quick summary
-/context verbose             # Everything included
+cd ~/.config/opencode/plugins/opencode-context-analysis
+bun install --prefix vendor && bun run build
 ```
 
-### Advanced Options
+Register in `~/.config/opencode/opencode.json`:
 
-**Custom verbosity** - Use any description you want:
+```json
+{
+  "command": {
+    "context": { "template": "{file:/home/colt/.config/opencode/plugins/opencode-context-analysis/commands/context.md}" }
+  },
+  "plugin": ["/home/colt/.config/opencode/plugins/opencode-context-analysis"]
+}
+```
+
+## Tokenizer Aliases
+
+`tokenizer-aliases.json` maps providers and model names to HuggingFace tokenizer repos. Two sections:
+
+- **`providers`**: maps provider IDs (e.g. `"9router"`, `"anthropic"`) to tokenizer hub repos. Used when no model-specific match is found.
+- **`transformers`**: maps model names (e.g. `"claude-opus-4"`, `"deepseek-r1"`) to tokenizer hub repos. Checked first by model name similarity.
+
+Both sections produce `{ kind: "transformers", hub: "<repo>" }` specs, which load tokenizers dynamically via `@huggingface/transformers`'s `AutoTokenizer.from_pretrained()`.
+
+### Updating aliases
+
+Add a new provider:
+
+```json
+"providers": {
+  "9router": "mlx-community/GLM-4.7-Flash-4bit"
+}
+```
+
+Add a new model:
+
+```json
+"transformers": {
+  "my-model-name": "org/tokenizer-repo"
+}
+```
+
+No rebuild needed — aliases are read at runtime via `fs.readFile`.
+
+## Vendor Dependencies
+
+| Package | Path | Required |
+|---------|------|----------|
+| `js-tiktoken` | `vendor/node_modules/js-tiktoken/` | Yes (OpenAI models) |
+| `@huggingface/transformers` | `vendor/node_modules/@huggingface/transformers/` | Yes (non-OpenAI models) |
+
+Install:
+
 ```bash
-/context "extremely detailed"  # Maximum detail
-/context "just the basics"     # Minimal info
-/context "focus on tools"      # Whatever you prefer
+cd vendor && bun add js-tiktoken @huggingface/transformers --ignore-scripts
 ```
 
-**Specific sessions**:
+## Build
+
 ```bash
-/context sessionID:your-session-id
+bun run build    # runs tsc, output to dist/
 ```
 
-**Limit analysis depth**:
+No need to copy `tokenizer-aliases.json` — it's read from plugin root at runtime.
+
+## Testing
+
+Run the full test suite:
+
 ```bash
-/context limitMessages:5    # Only analyze last 5 messages
+cd ~/.config/opencode/plugins/opencode-context-analysis
+node test.mjs
 ```
 
-### What You'll Learn
+This validates:
+- Vendor dependencies installed
+- `tokenizer-aliases.json` readable and configured
+- Tiktoken encoder works (OpenAI models)
+- HuggingFace tokenizer loads (non-OpenAI models, e.g. GLM for 9router)
+- Dist files built
 
-- **Which tools cost the most** - See if `bash`, `read`, or `webfetch` are using the most tokens
-- **System prompt impact** - Understand how much context is being set up
-- **Your conversation patterns** - See if you're writing long prompts or getting long responses
-- **Reasoning costs** - For models that support it, see how much reasoning tokens cost
+## Debugging Notes
 
-## 🔧 How It Works
+### Plugin must have `index.ts` at ROOT, not `.opencode/`
 
-**Dependencies**: The plugin uses two main libraries for accurate token counting:
-- `js-tiktoken` - Official OpenAI tokenizer for GPT models
-- `@huggingface/transformers` - Hugging Face tokenizers for Claude, Llama, Mistral, etc.
+The plugin loader expects `package.json` and `index.{ts,js}` at the plugin ROOT directory. Placing them inside `.opencode/` causes the loader to skip the plugin silently.
 
-**Installation Process**: The plugin automatically handles tokenizer dependencies when you first use it:
-1. Downloads tokenizer libraries to a local `vendor` directory
-2. Sets up everything without affecting your main project
-3. All token counting happens locally on your machine
+### Remove `exports` from package.json for file plugins
 
-**Privacy**: All token counting happens locally on your machine. No data is sent to external services.
+When a file-based plugin has an `exports` field in `package.json`, the entry resolver returns `undefined` for server-kind plugins. Keep `package.json` minimal — no `main`, no `exports`, no `types`.
 
-### Manual Installation (Advanced)
+### Two source files can exist — tsc compiles `.ts`, not `.mjs`
 
-If you prefer to set things up yourself:
-1. Clone the plugin and copy `.opencode` directory to your OpenCode project
-2. Install tokenizer dependencies manually:
-   ```bash
-   npm install js-tiktoken@latest @huggingface/transformers@^3.3.3 --prefix .opencode/plugin/vendor
-   ```
+Both `tokenizer-registry.mjs` (root) and `plugins/tokenizer-registry.ts` existed. `tsc` compiles the `.ts` version into `dist/plugins/tokenizer-registry.js`. Editing only the `.mjs` had zero effect. Always edit the `.ts` file.
 
-## 🛠️ Development
+### `import.meta.url` resolves to dist location, not source root
 
-### Project Structure
+When `tokenizer-registry.ts` compiles to `dist/plugins/tokenizer-registry.js`, `import.meta.url` points to `dist/plugins/`. Paths relative to plugin root use `path.join(moduleRoot, "..", "..")`.
 
-```
-.
-├── .opencode/
-│ ├── command/
-│ │ └── context.md # Command definition
-│ └── plugin/
-│ └── context-usage.ts # Main plugin implementation
-└── README.md # This file
-```
+### `model_to_encoding.json` missing in newer js-tiktoken
 
-### Building and Testing
+js-tiktoken no longer ships `model_to_encoding.json`. The plugin falls back to `BUILTIN_OPENAI_FALLBACK` (hardcoded map in `tokenizer-registry.ts`).
 
-The plugin is written in TypeScript and runs directly in the OpenCode environment. No build step is required.
+### Unknown providers get `kind: "approx"` fallback
 
-To test locally:
-1. Install in a test OpenCode project
-2. Start a session and run `/context`
-3. Verify token analysis appears correctly
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is open source. See the repository for license details.
-
-## Support
-
-For issues, questions, or contributions:
-- Open an issue on GitHub
-- Check OpenCode documentation for plugin development
-- Review the source code for implementation details
-
----
-
-**Made for [OpenCode](https://opencode.ai)** - Enhance your AI development workflow with detailed context analysis.
+Instead of throwing `TokenizerResolutionError` for unrecognized models/providers, the plugin returns `{ kind: "approx" }` which triggers `chars/4` estimation. Works with any provider without crashing.
