@@ -11,6 +11,9 @@ import { resolveTokenModel, TokenizerResolutionError } from "./tokenizer-registr
 const ENTRY_LIMIT = 3
 const vendorRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "vendor", "node_modules")
 
+let capturedSystemPrompt: string[] | null = null
+let lastToolOutput: string | null = null
+
 interface SessionMessage {
   info: SessionMessageInfo
   parts: SessionMessagePart[]
@@ -76,13 +79,28 @@ let transformersModule: Promise<any> | undefined
 
 export const ContextUsagePlugin: Plugin = async ({ client }) => {
   return {
+    "experimental.chat.system.transform": async (input, output) => {
+      capturedSystemPrompt = [...output.system]
+    },
+    "tool.execute.after": async (input, output) => {
+      if (input.tool === "context_usage" && output.output) {
+        lastToolOutput = output.output
+      }
+    },
+    "experimental.text.complete": async (input, output) => {
+      if (lastToolOutput) {
+        output.text = lastToolOutput + "\n\n" + output.text
+        lastToolOutput = null
+      }
+    },
     tool: {
       context_usage: tool({
         description:
-          "Get detailed token usage analysis for the current session. When this tool is called, analyze the results and provide a concise summary rather than reproducing the visual output.",
+          "Get detailed token usage analysis for the current session.",
         args: {
           sessionID: tool.schema.string().optional(),
           limitMessages: tool.schema.number().int().min(1).max(10).optional(),
+          debug: tool.schema.boolean().optional(),
         },
         async execute(args, context) {
           const sessionID = args.sessionID ?? context.sessionID
@@ -93,6 +111,10 @@ export const ContextUsagePlugin: Plugin = async ({ client }) => {
 
           if (!Array.isArray(messages) || messages.length === 0) {
             return `Session ${sessionID} has no messages yet.`
+          }
+
+          if (args.debug) {
+            return formatDebugInfo(messages, sessionID)
           }
 
           let tokenModel: TokenModel
@@ -128,7 +150,9 @@ async function buildContextSummary(input: {
 }): Promise<ContextSummary> {
   const { sessionID, messages, tokenModel, entryLimit } = input
 
-  const systemPrompts = collectSystemPrompts(messages)
+  const systemPrompts = capturedSystemPrompt
+    ? capturedSystemPrompt.filter((s) => s?.trim()).flatMap((content) => parseSystemPromptBlocks(content))
+    : collectSystemPrompts(messages)
   const userTexts = collectMessageTexts(messages, "user")
   const assistantTexts = collectMessageTexts(messages, "assistant")
   const toolOutputs = collectToolOutputs(messages)
@@ -191,68 +215,57 @@ function collectSystemPrompts(messages: SessionMessage[]): CategoryEntrySource[]
       prompts.set(trimmed, trimmed)
     }
   }
-  return Array.from(prompts.values()).map((content, index) => ({
-    label: identifySystemPrompt(content, index + 1),
-    content,
-  }))
+  const entries: CategoryEntrySource[] = []
+  for (const content of prompts.values()) {
+    entries.push(...parseSystemPromptBlocks(content))
+  }
+  return entries
 }
 
-function identifySystemPrompt(content: string, index: number): string {
-  const lower = content.toLowerCase()
+function parseSystemPromptBlocks(content: string): CategoryEntrySource[] {
+  const entries: CategoryEntrySource[] = []
+  const tagPatterns: Array<{ tag: string; label: string }> = [
+    { tag: "env", label: "System#Environment" },
+    { tag: "available_references", label: "System#References" },
+    { tag: "mcp_instructions", label: "System#MCP" },
+    { tag: "available_skills", label: "System#Skills" },
+  ]
 
-  // More specific identification with length/content patterns
-  if (lower.includes("opencode") && lower.includes("cli") && content.length > 500) {
-    return "System#MainPrompt"
-  }
-  if (lower.includes("opencode") && lower.includes("cli") && content.length <= 500) {
-    return "System#ShortPrompt"
-  }
-  if (lower.includes("agent") && lower.includes("mode")) {
-    return "System#AgentMode"
-  }
-  if (lower.includes("permission") || lower.includes("allowed") || lower.includes("deny")) {
-    return "System#Permissions"
-  }
-  if (lower.includes("tool") && (lower.includes("rule") || lower.includes("guideline"))) {
-    return "System#ToolRules"
-  }
-  if (lower.includes("format") || lower.includes("style") || lower.includes("concise")) {
-    return "System#Formatting"
-  }
-  if (lower.includes("project") || lower.includes("repository") || lower.includes("codebase")) {
-    return "System#ProjectContext"
-  }
-  if (lower.includes("session") || lower.includes("context") || lower.includes("memory")) {
-    return "System#SessionMgmt"
-  }
+  let remaining = content
 
-  // Check for file references
-  if (content.includes("@") && (content.includes(".md") || content.includes(".txt"))) {
-    return "System#FileRefs"
-  }
-
-  // Check for agent definitions
-  if (content.includes("name:") && content.includes("description:")) {
-    return "System#AgentDef"
-  }
-
-  // Check for coding guidelines
-  if (lower.includes("code") && (lower.includes("convention") || lower.includes("standard"))) {
-    return "System#CodeGuidelines"
-  }
-
-  // Distinguish by content length and patterns for similar prompts
-  if (lower.includes("opencode")) {
-    if (content.includes("```") || content.includes("examples")) {
-      return "System#MainWithExamples"
+  for (const { tag, label } of tagPatterns) {
+    const openTag = `<${tag}>`
+    const closeTag = `</${tag}>`
+    let startIdx = remaining.indexOf(openTag)
+    while (startIdx !== -1) {
+      const endIdx = remaining.indexOf(closeTag, startIdx + openTag.length)
+      if (endIdx === -1) break
+      const block = remaining.substring(startIdx, endIdx + closeTag.length)
+      entries.push({ label, content: block })
+      remaining = remaining.substring(0, startIdx) + remaining.substring(endIdx + closeTag.length)
+      startIdx = remaining.indexOf(openTag)
     }
-    if (index === 1) return "System#Main-A"
-    if (index === 2) return "System#Main-B"
-    return `System#Main-${index}`
   }
 
-  // Fallback to numbered
-  return `System#${index}`
+  const instructionsPattern = /Instructions from: (.+?)(?:\n|$)/g
+  let match
+  while ((match = instructionsPattern.exec(remaining)) !== null) {
+    const filepath = match[1].trim()
+    const filename = filepath.split("/").pop() ?? filepath
+    const afterNewline = remaining.indexOf("\n", match.index + match[0].length)
+    const nextMatch = instructionsPattern.exec(remaining)
+    const endIdx = nextMatch ? nextMatch.index : remaining.length
+    const block = remaining.substring(match.index, endIdx)
+    entries.push({ label: `System#Instructions (${filename})`, content: block.trim() })
+    remaining = remaining.substring(0, match.index) + remaining.substring(endIdx)
+    instructionsPattern.lastIndex = 0
+  }
+
+  if (remaining.trim()) {
+    entries.push({ label: "System#BasePrompt", content: remaining.trim() })
+  }
+
+  return entries
 }
 
 function collectMessageTexts(messages: SessionMessage[], role: "user" | "assistant"): CategoryEntrySource[] {
@@ -525,8 +538,9 @@ function formatSummary(summary: ContextSummary): string {
   ]
 
   const topEntries = collectTopEntries(summary, 10)
+  const systemBreakdown = summary.categories.system.entries
 
-  return formatVisualSummary(summary.sessionID, summary.model.name, summary.totalTokens, categories, topEntries)
+  return formatVisualSummary(summary.sessionID, summary.model.name, summary.totalTokens, categories, topEntries, systemBreakdown)
 }
 
 function formatVisualSummary(
@@ -535,6 +549,7 @@ function formatVisualSummary(
   totalTokens: number,
   categories: Array<{ label: string; tokens: number }>,
   topEntries: CategoryEntry[],
+  systemBreakdown: CategoryEntry[],
 ): string {
   const lines: string[] = []
 
@@ -559,6 +574,17 @@ function formatVisualSummary(
 
   // Total
   lines.push(`Total: ${formatNumber(totalTokens)} tokens`)
+
+  if (systemBreakdown.length > 0) {
+    lines.push(``)
+    lines.push(`System Prompt Breakdown:`)
+    for (const entry of systemBreakdown) {
+      const percentage = ((entry.tokens / totalTokens) * 100).toFixed(1)
+      const label = `  ${entry.label}`.padEnd(30)
+      const tokens = `${formatNumber(entry.tokens)} tokens (${percentage}%)`
+      lines.push(`${label} ${tokens}`)
+    }
+  }
 
   if (topEntries.length > 0) {
     lines.push(``)
@@ -615,4 +641,48 @@ function formatTokenizerResolutionError(error: TokenizerResolutionError, session
 function capitalize(value: string): string {
   if (!value) return value
   return value[0].toUpperCase() + value.slice(1)
+}
+
+function formatDebugInfo(messages: SessionMessage[], sessionID: string): string {
+  const lines: string[] = []
+  lines.push(`=== DEBUG: Session ${sessionID} ===`)
+  lines.push(`Total messages: ${messages.length}`)
+  lines.push("")
+
+  const byRole: Record<string, number> = {}
+  for (const msg of messages) {
+    const role = msg.info.role
+    byRole[role] = (byRole[role] ?? 0) + 1
+  }
+
+  lines.push("Messages by role:")
+  for (const [role, count] of Object.entries(byRole)) {
+    lines.push(`  ${role}: ${count}`)
+  }
+  lines.push("")
+
+  lines.push(`Captured system prompt: ${capturedSystemPrompt ? `${capturedSystemPrompt.length} strings` : "NOT CAPTURED"}`)
+  if (capturedSystemPrompt) {
+    for (let i = 0; i < capturedSystemPrompt.length; i++) {
+      const s = capturedSystemPrompt[i] ?? ""
+      lines.push(`  [${i}] len=${s.length}`)
+      lines.push(`  First 2000 chars:`)
+      lines.push(s.substring(0, 2000))
+      lines.push(`  ...`)
+      if (s.includes("<env>")) lines.push(`  Contains <env> tag`)
+      if (s.includes("<mcp_instructions>")) lines.push(`  Contains <mcp_instructions> tag`)
+      if (s.includes("<available_skills>")) lines.push(`  Contains <available_skills> tag`)
+      if (s.includes("Instructions from:")) lines.push(`  Contains "Instructions from:" pattern`)
+    }
+  }
+  lines.push("")
+
+  lines.push("Detailed message inspection (first 20):")
+  for (let i = 0; i < Math.min(messages.length, 20); i++) {
+    const msg = messages[i]
+    const sys = msg.info.system
+    lines.push(`  [${i}] role=${msg.info.role}, system=${sys ? `array(${sys.length})` : "undefined/null"}`)
+  }
+
+  return lines.join("\n")
 }
