@@ -2,6 +2,9 @@
 
 Provides a `/context` command that shows token usage breakdown by category (system, user, assistant, tools, reasoning) with bar chart visualization.
 
+<img width="1230" height="759" alt="image" src="https://github.com/user-attachments/assets/dd1837f5-1fda-4625-8259-0bfb6fd7619e" />
+Note: Tool output is currently prepended to the agent's response, as there is no known way to either call the tool without involving the agent or display the tool output in a collapsible window (similar to the Thought block).
+
 ## Usage
 
 ```
